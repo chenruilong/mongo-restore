@@ -1,0 +1,16 @@
+services:
+  app:
+    image: mongo-restore:latest
+    platform: linux/amd64
+    ports:
+      - "3456:3456"
+    volumes:
+      - backup-uploads:/tmp/backups
+      - backup-data:/tmp/backup-data
+    environment:
+      - PORT=3456
+    restart: unless-stopped
+
+volumes:
+  backup-uploads:
+  backup-data:

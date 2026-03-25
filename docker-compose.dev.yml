@@ -1,0 +1,22 @@
+services:
+  app:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3456:3456"
+      - "5173:5173"
+    volumes:
+      - ./packages/server/src:/app/packages/server/src
+      - ./packages/web/src:/app/packages/web/src
+      - ./packages/web/index.html:/app/packages/web/index.html
+      - ./packages/web/vite.config.ts:/app/packages/web/vite.config.ts
+      - backup-uploads:/tmp/backups
+      - backup-data:/tmp/backup-data
+    environment:
+      - PORT=3456
+
+volumes:
+  backup-uploads:
+  backup-data:
