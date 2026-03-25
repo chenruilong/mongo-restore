@@ -9,10 +9,6 @@ export const DATA_DIR = process.env.DATA_DIR || "/tmp/backup-data";
 // Maps version string to mongod binary path
 export const MONGO_VERSIONS: Record<string, string> = {
   "4.2": process.env.MONGOD_4_2 || "/opt/mongodb/4.2/bin/mongod",
-  "4.4": process.env.MONGOD_4_4 || "/opt/mongodb/4.4/bin/mongod",
-  "5.0": process.env.MONGOD_5_0 || "/opt/mongodb/5.0/bin/mongod",
-  "6.0": process.env.MONGOD_6_0 || "/opt/mongodb/6.0/bin/mongod",
-  "7.0": process.env.MONGOD_7_0 || "/opt/mongodb/7.0/bin/mongod",
   "8.0": process.env.MONGOD_8_0 || "/opt/mongodb/8.0/bin/mongod",
 };
 

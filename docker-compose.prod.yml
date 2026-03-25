@@ -1,7 +1,8 @@
 services:
   app:
-    image: mongo-restore:latest
+    image: crpi-xy1wtfoe9gyh3dhf.cn-beijing.personal.cr.aliyuncs.com/crlfe/mongo-restore:latest
     platform: linux/amd64
+    container_name: mongo-restore
     ports:
       - "3456:3456"
     volumes:

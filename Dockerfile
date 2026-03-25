@@ -13,8 +13,12 @@ RUN cd packages/web && bun run build
 # Stage 2: Runtime
 FROM ubuntu:24.04
 ARG TARGETARCH
+ARG HTTP_PROXY=http://host.docker.internal:7890
+ARG HTTPS_PROXY=http://host.docker.internal:7890
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV http_proxy=$HTTP_PROXY
+ENV https_proxy=$HTTPS_PROXY
 
 # Switch to USTC mirror for faster downloads in China
 RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.ustc.edu.cn|g; s|http://security.ubuntu.com|http://mirrors.ustc.edu.cn|g; s|http://ports.ubuntu.com|http://mirrors.ustc.edu.cn|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || \
@@ -71,10 +75,6 @@ RUN set -eux; \
       rm -rf "$extracted_dir" /tmp/mongodb.tgz; \
     }; \
     install_mongod '4.2' '4.2.25' 'ubuntu1804'; \
-    install_mongod '4.4' '4.4.29' 'ubuntu2004'; \
-    install_mongod '5.0' '5.0.31' 'ubuntu2004'; \
-    install_mongod '6.0' '6.0.18' 'ubuntu2204'; \
-    install_mongod '7.0' '7.0.17' 'ubuntu2204'; \
     install_mongod '8.0' '8.0.5' 'ubuntu2404'
 
 # Install Bun
@@ -82,13 +82,13 @@ RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH="/root/.bun/bin:$PATH"
 
 ENV MONGOD_4_2=/opt/mongodb/4.2/bin/mongod
-ENV MONGOD_4_4=/opt/mongodb/4.4/bin/mongod
-ENV MONGOD_5_0=/opt/mongodb/5.0/bin/mongod
-ENV MONGOD_6_0=/opt/mongodb/6.0/bin/mongod
-ENV MONGOD_7_0=/opt/mongodb/7.0/bin/mongod
 ENV MONGOD_8_0=/opt/mongodb/8.0/bin/mongod
 
 WORKDIR /app
+
+# Clear proxy for runtime
+ENV http_proxy=
+ENV https_proxy=
 
 # Copy built app
 COPY --from=builder /app/packages/server ./packages/server

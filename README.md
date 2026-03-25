@@ -6,7 +6,7 @@
 
 - **多格式支持** — 物理备份（xbstream、tar.gz）和逻辑备份（mongodump archive、mongodump directory）
 - **自动格式检测** — 上传后自动识别备份类型和格式
-- **多版本 MongoDB** — 支持 MongoDB 4.2 / 4.4 / 5.0 / 6.0 / 7.0 / 8.0
+- **多版本 MongoDB** — 支持 MongoDB 4.2 / 8.0
 - **可视化浏览** — 树形结构展示数据库、集合、文档数量
 - **选择性恢复** — 按数据库/集合粒度选择恢复内容
 - **多种恢复目标** — 恢复到远程 MongoDB 实例，或下载为 gzip/BSON/JSON 格式

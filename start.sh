@@ -103,16 +103,27 @@ else
   error "未检测到 Docker Compose，请确保 Docker 版本 >= 20.10 或手动安装 docker-compose-plugin。"
 fi
 
-# ------ 5. 检测镜像是否存在，决定是否需要构建 ------
-IMAGE_NAME="$(basename "$(pwd)")-app"
-
-if docker images --format '{{.Repository}}' | grep -q "^${IMAGE_NAME}$"; then
-  info "镜像 ${IMAGE_NAME} 已存在，直接启动..."
-  docker compose up -d
-else
-  info "镜像不存在，开始构建并启动（首次构建约 10-15 分钟）..."
-  docker compose up --build -d
-fi
+# ------ 5. 选择启动方式 ------
+echo ""
+echo "请选择启动方式："
+echo "  1) 使用阿里云 ACR 镜像启动（推荐，快速拉取）"
+echo "  2) 本地构建镜像并启动（代码有修改时选择）"
+echo ""
+read -r -p "请输入选项 [1/2]（默认 1）: " choice
+case "${choice:-1}" in
+  1)
+    info "使用阿里云 ACR 镜像启动..."
+    docker compose -f docker-compose.prod.yml up -d
+    ;;
+  2)
+    info "本地构建镜像并启动（首次构建约 10-15 分钟）..."
+    docker compose up --build -d
+    ;;
+  *)
+    warn "无效选项，使用默认方式（阿里云 ACR 镜像）启动..."
+    docker compose -f docker-compose.prod.yml up -d
+    ;;
+esac
 
 echo ""
 info "============================================"
