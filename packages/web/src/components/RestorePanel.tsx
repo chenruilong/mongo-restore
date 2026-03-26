@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Database, Download, Archive, FileJson, ArrowLeft, Play } from "lucide-react";
 import { startRestore, type SelectedItem, type DownloadFormat, type RemoteConnectionConfig } from "../lib/api";
 
 interface Props {
@@ -126,7 +127,10 @@ export default function RestorePanel({ backupId, selected, onStarted, onBack, on
                 onChange={() => setMode("remote")}
                 className="sr-only"
               />
-              <div className="text-sm font-medium text-gray-900">恢复到远程数据库</div>
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4" />
+                <div className="text-sm font-medium text-gray-900">恢复到远程数据库</div>
+              </div>
               <div className="text-xs text-gray-500 mt-1">连接到 MongoDB 实例，直接恢复数据</div>
             </div>
           </label>
@@ -145,7 +149,10 @@ export default function RestorePanel({ backupId, selected, onStarted, onBack, on
                 onChange={() => setMode("download")}
                 className="sr-only"
               />
-              <div className="text-sm font-medium text-gray-900">下载到本地</div>
+              <div className="flex items-center gap-2">
+                <Download className="w-4 h-4" />
+                <div className="text-sm font-medium text-gray-900">下载到本地</div>
+              </div>
               <div className="text-xs text-gray-500 mt-1">将选中的数据导出为可下载的备份文件</div>
             </div>
           </label>
@@ -315,8 +322,13 @@ export default function RestorePanel({ backupId, selected, onStarted, onBack, on
                         onChange={() => setDownloadFormat(opt.value)}
                         className="sr-only"
                       />
-                      <div className="text-sm font-medium text-gray-900">{opt.label}</div>
-                      <div className="text-xs text-gray-500 mt-0.5">{opt.desc}</div>
+                      <div className="flex items-center justify-center gap-2 mb-1">
+                        {opt.value === "gzip" && <Archive className="w-4 h-4" />}
+                        {opt.value === "bson" && <Database className="w-4 h-4" />}
+                        {opt.value === "json" && <FileJson className="w-4 h-4" />}
+                        <div className="text-sm font-medium text-gray-900">{opt.label}</div>
+                      </div>
+                      <div className="text-xs text-gray-500">{opt.desc}</div>
                     </div>
                   </label>
                 ))}
@@ -393,15 +405,17 @@ export default function RestorePanel({ backupId, selected, onStarted, onBack, on
         <button
           onClick={onBack}
           disabled={loading}
-          className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
         >
+          <ArrowLeft className="w-4 h-4" />
           返回
         </button>
         <button
           onClick={handleRestore}
           disabled={loading}
-          className="px-6 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="inline-flex items-center gap-2 px-6 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
+          {mode === "remote" ? <Play className="w-4 h-4" /> : <Download className="w-4 h-4" />}
           {loading ? "处理中..." : mode === "remote" ? "开始恢复" : "准备下载"}
         </button>
       </div>
