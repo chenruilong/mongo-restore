@@ -2,9 +2,6 @@ import type { Task, TaskEvent, TaskKind, TaskLogEntry, TaskResult } from "../typ
 import { generateId } from "../lib/utils";
 
 type TaskListener = (event: TaskEvent) => void;
-
-const MAX_TASK_LOGS = 300;
-
 class TaskManager {
   private tasks = new Map<string, Task>();
   private listeners = new Map<string, Set<TaskListener>>();
@@ -74,17 +71,24 @@ class TaskManager {
     const task = this.tasks.get(taskId);
     if (!task) return;
 
-    task.logs.push({
+    const logEntry = {
       ts: log.ts ?? Date.now(),
       level: log.level,
       message: log.message,
-    });
+    };
 
-    if (task.logs.length > MAX_TASK_LOGS) {
-      task.logs.splice(0, task.logs.length - MAX_TASK_LOGS);
+    // 直接通过 emit 推送日志，不保存
+    const event = this.toEvent(task);
+    event.logs = [logEntry]; // 只发送这一条新日志
+
+    const taskListeners = this.listeners.get(taskId);
+    if (taskListeners) {
+      for (const listener of taskListeners) {
+        try {
+          listener(event);
+        } catch {}
+      }
     }
-
-    this.emit(taskId);
   }
 
   setResult(taskId: string, result: TaskResult) {

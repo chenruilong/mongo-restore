@@ -16,6 +16,8 @@ services:
       - backup-data:/tmp/backup-data
     environment:
       - PORT=3456
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   backup-uploads:

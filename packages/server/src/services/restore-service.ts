@@ -1,6 +1,12 @@
 import path from "path";
 import fs from "fs/promises";
-import type { BackupMeta, SelectedItem, RestoreTarget, DownloadFormat, RemoteConnectionConfig } from "../types";
+import type {
+  BackupMeta,
+  SelectedItem,
+  RestoreTarget,
+  DownloadFormat,
+  RemoteConnectionConfig,
+} from "../types";
 import { taskManager } from "./task-manager";
 import { getMongodPort } from "../lib/mongod-manager";
 import { ensureDir, getDataPath } from "../lib/utils";
@@ -12,7 +18,7 @@ export async function executeRestore(
   backup: BackupMeta,
   selected: SelectedItem[],
   target: RestoreTarget,
-  taskId: string
+  taskId: string,
 ): Promise<void> {
   taskManager.updateTask(taskId, {
     status: "running",
@@ -21,7 +27,7 @@ export async function executeRestore(
   });
   taskManager.appendLog(taskId, {
     level: "info",
-    message: `Starting restore for ${selected.length} item(s)` ,
+    message: `Starting restore for ${selected.length} item(s)`,
   });
 
   try {
@@ -32,9 +38,19 @@ export async function executeRestore(
       });
 
       if (backup.type === "logical") {
-        await restoreLogicalToRemote(backup, selected, target.connection, taskId);
+        await restoreLogicalToRemote(
+          backup,
+          selected,
+          target.connection,
+          taskId,
+        );
       } else {
-        await restorePhysicalToRemote(backup, selected, target.connection, taskId);
+        await restorePhysicalToRemote(
+          backup,
+          selected,
+          target.connection,
+          taskId,
+        );
       }
 
       taskManager.updateTask(taskId, {
@@ -86,7 +102,7 @@ async function restoreLogicalToRemote(
   backup: BackupMeta,
   selected: SelectedItem[],
   connection: RemoteConnectionConfig,
-  taskId: string
+  taskId: string,
 ) {
   const targetDb = connection.database;
   const uri = buildMongoUri(connection);
@@ -102,6 +118,8 @@ async function restoreLogicalToRemote(
       `--archive=${extractedPath}`,
       "--gzip",
       "--drop",
+      "--numParallelCollections=10",
+      "--numInsertionWorkersPerCollection=5",
       ...nsIncludes,
     ];
   } else {
@@ -116,6 +134,8 @@ async function restoreLogicalToRemote(
       `--uri=${uri}`,
       `--dir=${extractedPath}`,
       "--drop",
+      "--numParallelCollections=10",
+      "--numInsertionWorkersPerCollection=5",
       ...nsIncludes,
     ];
 
@@ -145,11 +165,13 @@ async function restorePhysicalToRemote(
   backup: BackupMeta,
   selected: SelectedItem[],
   connection: RemoteConnectionConfig,
-  taskId: string
+  taskId: string,
 ) {
   const port = getMongodPort(backup.id);
   if (!port) {
-    throw new Error("No mongod instance running for this backup. Please start mongod first.");
+    throw new Error(
+      "No mongod instance running for this backup. Please start mongod first.",
+    );
   }
 
   const targetDb = connection.database;
@@ -157,6 +179,31 @@ async function restorePhysicalToRemote(
 
   const total = selected.length;
   let completed = 0;
+
+  // 收集需要删除的数据库（只恢复整个数据库时才删除）
+  const databasesToDrop = new Set<string>();
+  for (const item of selected) {
+    if (!item.collection) {
+      databasesToDrop.add(item.database); // 源数据库
+      if (targetDb && targetDb !== item.database) {
+        databasesToDrop.add(targetDb); // 目标数据库
+      }
+    }
+  }
+
+  // 先删除这些数据库
+  for (const db of databasesToDrop) {
+    taskManager.appendLog(taskId, {
+      level: "info",
+      message: `Dropping database ${db} before restore`,
+    });
+    await dropDatabaseViaConnection(connection, db);
+  }
+
+  // 等待删除操作完成
+  if (databasesToDrop.size > 0) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
 
   for (const item of selected) {
     const stepDesc = item.collection
@@ -172,56 +219,55 @@ async function restorePhysicalToRemote(
       message: stepDesc,
     });
 
+    const tmpArchive = path.join(
+      "/tmp",
+      `dump-${item.database}-${Date.now()}.archive.gz`,
+    );
+
     const dumpArgs = [
       "mongodump",
       "--host=127.0.0.1",
       `--port=${port}`,
       `--db=${item.database}`,
       ...(item.collection ? [`--collection=${item.collection}`] : []),
-      "--archive",
+      `--archive=${tmpArchive}`,
       "--gzip",
-    ];
-
-    const restoreArgs = [
-      "mongorestore",
-      `--uri=${uri}`,
-      "--archive",
-      "--gzip",
-      "--drop",
+      "--verbose",
     ];
 
     taskManager.appendLog(taskId, {
       level: "info",
       message: `Executing dump: ${dumpArgs.join(" ")}`,
     });
+
+    await runCommandWithLogs(dumpArgs, taskId, "mongodump");
+
+    taskManager.updateTask(taskId, {
+      currentStep: `Dumped ${item.database}, starting restore...`,
+      progress:
+        Math.round((completed / total) * 100) + Math.round((1 / total) * 50),
+    });
+
+    const restoreArgs = [
+      "mongorestore",
+      `--uri=${uri}`,
+      `--archive=${tmpArchive}`,
+      "--gzip",
+      "--drop",
+      "--numParallelCollections=10",
+      "--numInsertionWorkersPerCollection=5",
+      "--verbose",
+    ];
+
     taskManager.appendLog(taskId, {
       level: "info",
       message: `Executing restore: ${restoreArgs.join(" ")}`,
     });
 
-    const dumpProc = Bun.spawn(dumpArgs, { stdout: "pipe", stderr: "pipe" });
-    const restoreProc = Bun.spawn(restoreArgs, {
-      stdin: dumpProc.stdout,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-
-    // dumpProc.stdout is piped to restoreProc.stdin — only read stderr for dump
-    const dumpStderrPromise = streamProcessStderr(dumpProc, taskId, "mongodump");
-    const restoreStderrPromise = streamProcessStderr(restoreProc, taskId, "mongorestore");
-
-    const [dumpExit, restoreExit, dumpStderr, restoreStderr] = await Promise.all([
-      dumpProc.exited,
-      restoreProc.exited,
-      dumpStderrPromise,
-      restoreStderrPromise,
-    ]);
-
-    if (dumpExit !== 0) {
-      throw new Error(`mongodump failed for ${item.database}: ${dumpStderr}`);
-    }
-    if (restoreExit !== 0) {
-      throw new Error(`mongorestore failed for ${item.database}: ${restoreStderr}`);
+    try {
+      await runCommandWithLogs(restoreArgs, taskId, "mongorestore");
+    } finally {
+      await fs.unlink(tmpArchive).catch(() => {});
     }
 
     if (targetDb && targetDb !== item.database && !item.collection) {
@@ -243,7 +289,7 @@ async function prepareLogicalDownload(
   backup: BackupMeta,
   selected: SelectedItem[],
   taskId: string,
-  format: DownloadFormat
+  format: DownloadFormat,
 ) {
   const downloadDir = path.join(getDataPath(backup.id), "download");
   await ensureDir(downloadDir);
@@ -262,10 +308,19 @@ async function prepareLogicalDownload(
     const outputFile = path.join(downloadDir, "backup.archive.gz");
 
     if (backup.format === "mongodump-archive") {
-      taskManager.updateTask(taskId, { currentStep: "Preparing download...", progress: 50 });
-      taskManager.appendLog(taskId, { level: "info", message: `Copying archive to ${outputFile}` });
+      taskManager.updateTask(taskId, {
+        currentStep: "Preparing download...",
+        progress: 50,
+      });
+      taskManager.appendLog(taskId, {
+        level: "info",
+        message: `Copying archive to ${outputFile}`,
+      });
       await fs.copyFile(extractedPath, outputFile);
-      taskManager.updateTask(taskId, { downloadPath: outputFile, progress: 100 });
+      taskManager.updateTask(taskId, {
+        downloadPath: outputFile,
+        progress: 100,
+      });
       return;
     }
 
@@ -282,8 +337,14 @@ async function prepareLogicalDownload(
 
   // format === "bson" or gzip fallback for non-archive without mongod
   const outputFile = path.join(downloadDir, "backup.tar.gz");
-  taskManager.updateTask(taskId, { currentStep: "Creating archive...", progress: 50 });
-  taskManager.appendLog(taskId, { level: "info", message: "Collecting selected BSON files" });
+  taskManager.updateTask(taskId, {
+    currentStep: "Creating archive...",
+    progress: 50,
+  });
+  taskManager.appendLog(taskId, {
+    level: "info",
+    message: "Collecting selected BSON files",
+  });
 
   const dumpRoot = path.join(downloadDir, "dump");
   await ensureDir(dumpRoot);
@@ -294,7 +355,10 @@ async function prepareLogicalDownload(
     await ensureDir(targetDbDir);
 
     if (item.collection) {
-      taskManager.appendLog(taskId, { level: "info", message: `Copying ${item.database}.${item.collection}` });
+      taskManager.appendLog(taskId, {
+        level: "info",
+        message: `Copying ${item.database}.${item.collection}`,
+      });
       const fileNames = [
         `${item.collection}.bson`,
         `${item.collection}.bson.gz`,
@@ -308,13 +372,20 @@ async function prepareLogicalDownload(
         } catch {}
       }
     } else {
-      taskManager.appendLog(taskId, { level: "info", message: `Copying database ${item.database}` });
+      taskManager.appendLog(taskId, {
+        level: "info",
+        message: `Copying database ${item.database}`,
+      });
       await fs.cp(sourceDbDir, targetDbDir, { recursive: true });
     }
   }
 
   taskManager.updateTask(taskId, { currentStep: "Packaging...", progress: 90 });
-  await runCommandWithLogs(["tar", "czf", outputFile, "-C", downloadDir, "dump"], taskId, "tar");
+  await runCommandWithLogs(
+    ["tar", "czf", outputFile, "-C", downloadDir, "dump"],
+    taskId,
+    "tar",
+  );
   taskManager.updateTask(taskId, { downloadPath: outputFile, progress: 100 });
 }
 
@@ -322,11 +393,13 @@ async function preparePhysicalDownload(
   backup: BackupMeta,
   selected: SelectedItem[],
   taskId: string,
-  format: DownloadFormat
+  format: DownloadFormat,
 ) {
   const port = getMongodPort(backup.id);
   if (!port) {
-    throw new Error("No mongod instance running for this backup. Please start mongod first.");
+    throw new Error(
+      "No mongod instance running for this backup. Please start mongod first.",
+    );
   }
 
   const downloadDir = path.join(getDataPath(backup.id), "download");
@@ -352,9 +425,12 @@ async function dumpAsArchive(
   port: number,
   selected: SelectedItem[],
   outputFile: string,
-  taskId: string
+  taskId: string,
 ) {
-  taskManager.updateTask(taskId, { currentStep: "Dumping as archive...", progress: 10 });
+  taskManager.updateTask(taskId, {
+    currentStep: "Dumping as archive...",
+    progress: 10,
+  });
 
   const args = [
     "mongodump",
@@ -371,7 +447,10 @@ async function dumpAsArchive(
     }
   }
 
-  taskManager.appendLog(taskId, { level: "info", message: `Executing: ${args.join(" ")}` });
+  taskManager.appendLog(taskId, {
+    level: "info",
+    message: `Executing: ${args.join(" ")}`,
+  });
   await runCommandWithLogs(args, taskId, "mongodump");
   taskManager.updateTask(taskId, { downloadPath: outputFile, progress: 100 });
 }
@@ -381,13 +460,16 @@ async function dumpAsBson(
   port: number,
   selected: SelectedItem[],
   downloadDir: string,
-  taskId: string
+  taskId: string,
 ) {
   const dumpRoot = path.join(downloadDir, "dump");
   await ensureDir(dumpRoot);
   const outputFile = path.join(downloadDir, "backup.tar.gz");
 
-  taskManager.updateTask(taskId, { currentStep: "Dumping as BSON...", progress: 10 });
+  taskManager.updateTask(taskId, {
+    currentStep: "Dumping as BSON...",
+    progress: 10,
+  });
 
   const args = [
     "mongodump",
@@ -403,11 +485,21 @@ async function dumpAsBson(
     }
   }
 
-  taskManager.appendLog(taskId, { level: "info", message: `Executing: ${args.join(" ")}` });
+  taskManager.appendLog(taskId, {
+    level: "info",
+    message: `Executing: ${args.join(" ")}`,
+  });
   await runCommandWithLogs(args, taskId, "mongodump");
 
-  taskManager.updateTask(taskId, { currentStep: "Packaging BSON files...", progress: 80 });
-  await runCommandWithLogs(["tar", "czf", outputFile, "-C", downloadDir, "dump"], taskId, "tar");
+  taskManager.updateTask(taskId, {
+    currentStep: "Packaging BSON files...",
+    progress: 80,
+  });
+  await runCommandWithLogs(
+    ["tar", "czf", outputFile, "-C", downloadDir, "dump"],
+    taskId,
+    "tar",
+  );
   taskManager.updateTask(taskId, { downloadPath: outputFile, progress: 100 });
 }
 
@@ -416,13 +508,16 @@ async function exportJson(
   port: number,
   selected: SelectedItem[],
   downloadDir: string,
-  taskId: string
+  taskId: string,
 ) {
   const exportRoot = path.join(downloadDir, "export");
   await ensureDir(exportRoot);
   const outputFile = path.join(downloadDir, "backup.tar.gz");
 
-  taskManager.updateTask(taskId, { currentStep: "Exporting as JSON...", progress: 10 });
+  taskManager.updateTask(taskId, {
+    currentStep: "Exporting as JSON...",
+    progress: 10,
+  });
 
   // Expand database-level selections to individual collections
   const items: Array<{ database: string; collection: string }> = [];
@@ -446,7 +541,10 @@ async function exportJson(
     }
   }
 
-  taskManager.appendLog(taskId, { level: "info", message: `Exporting ${items.length} collection(s) as JSON` });
+  taskManager.appendLog(taskId, {
+    level: "info",
+    message: `Exporting ${items.length} collection(s) as JSON`,
+  });
 
   for (let i = 0; i < items.length; i++) {
     const { database, collection } = items[i];
@@ -469,21 +567,49 @@ async function exportJson(
       "--jsonArray",
     ];
 
-    taskManager.appendLog(taskId, { level: "info", message: `Executing: ${args.join(" ")}` });
+    taskManager.appendLog(taskId, {
+      level: "info",
+      message: `Executing: ${args.join(" ")}`,
+    });
     await runCommandWithLogs(args, taskId, "mongoexport");
   }
 
-  taskManager.updateTask(taskId, { currentStep: "Packaging JSON files...", progress: 85 });
-  await runCommandWithLogs(["tar", "czf", outputFile, "-C", downloadDir, "export"], taskId, "tar");
+  taskManager.updateTask(taskId, {
+    currentStep: "Packaging JSON files...",
+    progress: 85,
+  });
+  await runCommandWithLogs(
+    ["tar", "czf", outputFile, "-C", downloadDir, "export"],
+    taskId,
+    "tar",
+  );
   taskManager.updateTask(taskId, { downloadPath: outputFile, progress: 100 });
 }
 
-async function runCommandWithLogs(args: string[], taskId: string, label?: string) {
+async function runCommandWithLogs(
+  args: string[],
+  taskId: string,
+  label?: string,
+) {
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
   const logsPromise = streamProcessOutput(proc, taskId, label ?? args[0]);
   const [exitCode, logs] = await Promise.all([proc.exited, logsPromise]);
 
   if (exitCode !== 0) {
+    // mongorestore 特殊处理：如果有文档成功恢复且无失败，忽略 EOF 错误
+    if (args[0] === "mongorestore") {
+      const output = logs.stderr + logs.stdout;
+      const successMatch = output.match(
+        /(\d+) document\(s\) restored successfully\. (\d+) document\(s\) failed/,
+      );
+      if (
+        successMatch &&
+        parseInt(successMatch[1]) > 0 &&
+        successMatch[2] === "0"
+      ) {
+        return;
+      }
+    }
     throw new Error(`${args[0]} failed: ${logs.stderr || logs.stdout}`);
   }
 }
@@ -491,16 +617,19 @@ async function runCommandWithLogs(args: string[], taskId: string, label?: string
 async function streamProcessOutput(
   proc: Bun.Subprocess,
   taskId: string,
-  label: string
+  label: string,
 ): Promise<{ stdout: string; stderr: string }> {
   const stdoutChunks: string[] = [];
   const stderrChunks: string[] = [];
 
-  const stdoutStream = proc.stdout instanceof ReadableStream ? proc.stdout : null;
-  const stderrStream = proc.stderr instanceof ReadableStream ? proc.stderr : null;
+  const stdoutStream =
+    proc.stdout instanceof ReadableStream ? proc.stdout : null;
+  const stderrStream =
+    proc.stderr instanceof ReadableStream ? proc.stderr : null;
 
   const stdoutPromise = readStreamLines(stdoutStream, (line) => {
     stdoutChunks.push(line);
+    console.log("[STDOUT]", line);
     taskManager.appendLog(taskId, {
       level: "info",
       message: `[${label}] ${line}`,
@@ -509,8 +638,10 @@ async function streamProcessOutput(
 
   const stderrPromise = readStreamLines(stderrStream, (line) => {
     stderrChunks.push(line);
+    const level = lineLooksLikeError(line) ? "error" : "info";
+    console.log("[STDERR]", level, line);
     taskManager.appendLog(taskId, {
-      level: lineLooksLikeError(line) ? "error" : "stderr",
+      level,
       message: `[${label}] ${line}`,
     });
   });
@@ -525,7 +656,7 @@ async function streamProcessOutput(
 
 async function readStreamLines(
   stream: ReadableStream<Uint8Array> | null,
-  onLine: (line: string) => void
+  onLine: (line: string) => void,
 ) {
   if (!stream) return;
 
@@ -555,10 +686,11 @@ async function readStreamLines(
 async function streamProcessStderr(
   proc: Bun.Subprocess,
   taskId: string,
-  label: string
+  label: string,
 ): Promise<string> {
   const chunks: string[] = [];
-  const stderrStream = proc.stderr instanceof ReadableStream ? proc.stderr : null;
+  const stderrStream =
+    proc.stderr instanceof ReadableStream ? proc.stderr : null;
 
   await readStreamLines(stderrStream, (line) => {
     chunks.push(line);
@@ -573,7 +705,11 @@ async function streamProcessStderr(
 
 function lineLooksLikeError(line: string): boolean {
   const lower = line.toLowerCase();
-  return lower.includes("error") || lower.includes("failed") || lower.includes("fatal");
+  return (
+    lower.includes("error") ||
+    lower.includes("failed") ||
+    lower.includes("fatal")
+  );
 }
 
 function buildNsIncludes(selected: SelectedItem[]): string[] {
@@ -585,21 +721,28 @@ function buildNsIncludes(selected: SelectedItem[]): string[] {
   });
 }
 
-function buildMongoUri(config: RemoteConnectionConfig, includeDb?: boolean): string {
+function buildMongoUri(
+  config: RemoteConnectionConfig,
+  includeDb?: boolean,
+): string {
   const hosts = config.hosts.map((h) => `${h.host}:${h.port}`).join(",");
 
   let userInfo = "";
   if (config.username) {
     const user = encodeURIComponent(config.username);
-    const pass = config.password ? `:${encodeURIComponent(config.password)}` : "";
+    const pass = config.password
+      ? `:${encodeURIComponent(config.password)}`
+      : "";
     userInfo = `${user}${pass}@`;
   }
 
   const dbPart = includeDb && config.database ? `/${config.database}` : "/";
 
   const params: string[] = [];
-  if (config.authSource) params.push(`authSource=${encodeURIComponent(config.authSource)}`);
-  if (config.replicaSet) params.push(`replicaSet=${encodeURIComponent(config.replicaSet)}`);
+  if (config.authSource)
+    params.push(`authSource=${encodeURIComponent(config.authSource)}`);
+  if (config.replicaSet)
+    params.push(`replicaSet=${encodeURIComponent(config.replicaSet)}`);
   if (config.tls) params.push("tls=true");
   const query = params.length > 0 ? `?${params.join("&")}` : "";
 
@@ -609,7 +752,7 @@ function buildMongoUri(config: RemoteConnectionConfig, includeDb?: boolean): str
 async function renameDatabaseViaConnection(
   connection: RemoteConnectionConfig,
   sourceDb: string,
-  targetDb: string
+  targetDb: string,
 ): Promise<void> {
   const uri = buildMongoUri(connection, true);
   const { MongoClient } = await import("mongodb");
@@ -639,6 +782,22 @@ async function renameDatabaseViaConnection(
     }
 
     await sourceDbObj.dropDatabase();
+  } finally {
+    await client.close();
+  }
+}
+
+async function dropDatabaseViaConnection(
+  connection: RemoteConnectionConfig,
+  dbName: string,
+): Promise<void> {
+  const uri = buildMongoUri(connection, true);
+  const { MongoClient } = await import("mongodb");
+  const client = new MongoClient(uri);
+
+  try {
+    await client.connect();
+    await client.db(dbName).dropDatabase();
   } finally {
     await client.close();
   }
