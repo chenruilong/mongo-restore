@@ -361,19 +361,28 @@ export default function RestorePanel({ backupId, selected, onStarted, onBack, on
             )}
 
             {downloadFormat === "json" && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h4 className="text-sm font-medium text-blue-900 mb-2">JSON 导出</h4>
-                <p className="text-xs text-blue-700 mb-3">
-                  每个集合导出为独立的 JSON 文件，便于数据分析和查看：
-                </p>
-                <div className="bg-white rounded border border-blue-200 p-3 font-mono text-xs">
-                  <div className="text-gray-500 mb-1"># 解压并用 mongoimport 导入</div>
-                  <code className="text-gray-800">
-                    tar xzf backup.tar.gz && mongoimport --uri="mongodb://host:27017" --db=mydb --collection=mycol
-                    --file=export/mydb/mycol.json
-                  </code>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-4">
+                <div>
+                  <h4 className="text-sm font-medium text-blue-900 mb-2">MongoDB Compass 导入</h4>
+                  <ol className="list-decimal list-inside space-y-1 text-xs text-blue-700 mb-3">
+                    <li>解压下载的文件</li>
+                    <li>打开 MongoDB Compass 并连接到目标数据库</li>
+                    <li>选择目标数据库和集合</li>
+                    <li>点击 "Add Data" → "Import JSON or CSV file"</li>
+                    <li>选择解压后的 JSON 文件并导入</li>
+                  </ol>
                 </div>
-                <p className="text-xs text-amber-600 mt-3">注意：JSON 导出需要已启动的 MongoDB 临时实例</p>
+                <div className="border-t border-blue-200 pt-4">
+                  <h4 className="text-sm font-medium text-blue-900 mb-2">mongoimport 命令行导入</h4>
+                  <div className="bg-white rounded border border-blue-200 p-3 font-mono text-xs">
+                    <div className="text-gray-500 mb-1"># 导入单个集合</div>
+                    <code className="text-gray-800">
+                      mongoimport --uri="mongodb://host:27017/dbname" --collection=mycol --file=export/mydb/mycol.json --jsonArray
+                    </code>
+                  </div>
+                  <p className="text-xs text-blue-600 mt-2">提示：对每个 JSON 文件分别执行命令，替换 --collection 和 --file 参数</p>
+                </div>
+                <p className="text-xs text-amber-600">注意：JSON 导出需要已启动的 MongoDB 临时实例</p>
               </div>
             )}
           </div>

@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { CloudUpload } from "lucide-react";
 import { initUploadTask, uploadFileToTask } from "../lib/api";
 
 interface Props {
@@ -85,9 +86,7 @@ export default function FileUpload({ onStarted, onError }: Props) {
           </div>
         ) : (
           <div className="space-y-3">
-            <svg className="mx-auto w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
+            <CloudUpload className="mx-auto w-12 h-12 text-gray-400" />
             <p className="text-sm text-gray-600">
               将备份文件拖拽到此处，或 <span className="text-emerald-600 font-medium">点击选择文件</span>
             </p>

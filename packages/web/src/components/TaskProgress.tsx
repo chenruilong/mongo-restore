@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, XCircle, Download, Loader2 } from "lucide-react";
 import { subscribeTaskStatus, getDownloadUrl, type TaskEvent } from "../lib/api";
 
 interface Props {
@@ -6,37 +7,37 @@ interface Props {
   event: TaskEvent | null;
   onUpdate: (event: TaskEvent) => void;
   onReset: () => void;
+  onContinueRestore?: () => void;
 }
 
-export default function TaskProgress({ taskId, event, onUpdate, onReset }: Props) {
+export default function TaskProgress({ taskId, event, onUpdate, onReset, onContinueRestore }: Props) {
   const logContainerRef = useRef<HTMLDivElement>(null);
-  const userScrolledUp = useRef(false);
+  const onUpdateRef = useRef(onUpdate);
+  const [autoScroll, setAutoScroll] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = subscribeTaskStatus(taskId, onUpdate);
+    onUpdateRef.current = onUpdate;
+  }, [onUpdate]);
+
+  useEffect(() => {
+    console.log("Subscribing to task updates for taskId:", taskId);
+    const unsubscribe = subscribeTaskStatus(taskId, (event) => onUpdateRef.current(event));
     return unsubscribe;
-  }, [taskId, onUpdate]);
+  }, [taskId]);
 
   useEffect(() => {
     const el = logContainerRef.current;
-    if (!el || userScrolledUp.current) return;
-    el.scrollTop = el.scrollHeight;
-  }, [event?.logs]);
-
-  const handleLogScroll = () => {
-    const el = logContainerRef.current;
-    if (!el) return;
-    // Consider "at bottom" if within 30px of the bottom
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 30;
-    userScrolledUp.current = !atBottom;
-  };
+    if (!el || !autoScroll) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [event?.logs?.length, autoScroll]);
 
   const status = event?.status || "pending";
   const progress = event?.progress || 0;
   const currentStep = event?.currentStep || "等待中...";
   const error = event?.error;
   const kind = event?.kind || "restore";
-  const logs = event?.logs || [];
+  const allLogs = event?.logs || [];
+  const logs = allLogs.slice(-300); // 只保留最近300条
 
   const isDone = status === "completed";
   const isFailed = status === "failed";
@@ -83,9 +84,7 @@ export default function TaskProgress({ taskId, event, onUpdate, onReset }: Props
         <div className="flex items-center justify-center py-2">
           {isDone && (
             <div className="flex items-center gap-3 text-emerald-600">
-              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+              <CheckCircle2 className="w-10 h-10" />
               <span className="text-lg font-medium">处理成功</span>
             </div>
           )}
@@ -93,9 +92,7 @@ export default function TaskProgress({ taskId, event, onUpdate, onReset }: Props
           {isFailed && (
             <div className="space-y-2">
               <div className="flex items-center gap-3 text-red-600">
-                <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+                <XCircle className="w-10 h-10" />
                 <span className="text-lg font-medium">处理失败</span>
               </div>
               {error && (
@@ -107,22 +104,29 @@ export default function TaskProgress({ taskId, event, onUpdate, onReset }: Props
           )}
 
           {!isDone && !isFailed && (
-            <svg className="animate-spin h-8 w-8 text-emerald-500" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
+            <Loader2 className="animate-spin h-8 w-8 text-emerald-500" />
           )}
         </div>
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-medium text-gray-900">详细输出</h3>
-            <span className="text-xs text-gray-400">最近 {logs.length} 条</span>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoScroll}
+                  onChange={(e) => setAutoScroll(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                自动滚动
+              </label>
+              <span className="text-xs text-gray-400">最近 {logs.length} 条</span>
+            </div>
           </div>
           <div
             ref={logContainerRef}
-            onScroll={handleLogScroll}
-            className="max-h-72 overflow-y-auto rounded-lg bg-gray-950 px-4 py-3 font-mono text-xs leading-5"
+            className="h-96 overflow-y-auto rounded-lg bg-gray-950 px-4 py-3 font-mono text-xs leading-5"
           >
             {logs.length === 0 ? (
               <div className="text-gray-500">等待任务输出...</div>
@@ -147,22 +151,30 @@ export default function TaskProgress({ taskId, event, onUpdate, onReset }: Props
         </div>
 
         {isDone && event?.downloadPath && (
-          <div className="flex justify-center">
-            <a
-              href={getDownloadUrl(taskId)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
-              download
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              下载备份文件
-            </a>
-          </div>
+          <>
+            <div className="flex justify-center">
+              <a
+                href={getDownloadUrl(taskId)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+                download
+              >
+                <Download className="w-4 h-4" />
+                下载备份文件
+              </a>
+            </div>
+          </>
         )}
       </div>
 
-      <div className="flex justify-center">
+      <div className="flex justify-center gap-3">
+        {(isDone || isFailed) && kind === "restore" && onContinueRestore && (
+          <button
+            onClick={onContinueRestore}
+            className="px-4 py-2 text-sm text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors"
+          >
+            继续恢复
+          </button>
+        )}
         <button
           onClick={onReset}
           className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 border border-gray-300 rounded-lg transition-colors"

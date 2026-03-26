@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Loader2, ChevronRight } from "lucide-react";
 import { getBackupTree, type BackupTree as BackupTreeType, type SelectedItem } from "../lib/api";
 import MongodConfig from "./MongodConfig";
 
@@ -172,10 +173,7 @@ export default function BackupTree({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <svg className="animate-spin h-6 w-6 text-emerald-500 mr-3" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
+        <Loader2 className="animate-spin h-6 w-6 text-emerald-500 mr-3" />
         <span className="text-gray-600">正在解析备份...</span>
       </div>
     );
@@ -208,9 +206,7 @@ export default function BackupTree({
             {/* Database row */}
             <div className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50">
               <button onClick={() => toggleExpand(db.name)} className="text-gray-400 hover:text-gray-600">
-                <svg className={`w-4 h-4 transition-transform ${expanded.has(db.name) ? "rotate-90" : ""}`} fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                </svg>
+                <ChevronRight className={`w-4 h-4 transition-transform ${expanded.has(db.name) ? "rotate-90" : ""}`} />
               </button>
               <input
                 type="checkbox"

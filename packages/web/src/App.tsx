@@ -41,7 +41,14 @@ export default function App() {
   };
 
   const handleTaskUpdate = (event: TaskEvent) => {
-    setTaskEvent(event);
+    setTaskEvent((prev) => {
+      if (!prev) return event;
+      // 累积日志
+      return {
+        ...event,
+        logs: [...(prev.logs || []), ...(event.logs || [])],
+      };
+    });
 
     if (event.status === "failed") {
       setError(event.error || null);
@@ -81,6 +88,13 @@ export default function App() {
     setUploadResult(null);
     setBackupTree(null);
     setSelected([]);
+    setTaskId(null);
+    setTaskEvent(null);
+    setError(null);
+  };
+
+  const handleContinueRestore = () => {
+    setStep("browse");
     setTaskId(null);
     setTaskEvent(null);
     setError(null);
@@ -138,6 +152,7 @@ export default function App() {
           event={taskEvent}
           onUpdate={handleTaskUpdate}
           onReset={handleReset}
+          onContinueRestore={handleContinueRestore}
         />
       )}
     </Layout>
