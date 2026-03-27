@@ -14,7 +14,7 @@ RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.ustc.edu.cn|g; s|http://s
 
 # Install base tools
 RUN apt-get update && apt-get install -y \
-    curl wget gnupg ca-certificates software-properties-common unzip tar gzip \
+    curl wget gnupg ca-certificates software-properties-common unzip tar gzip zstd \
     && rm -rf /var/lib/apt/lists/*
 
 # Install MongoDB Database Tools

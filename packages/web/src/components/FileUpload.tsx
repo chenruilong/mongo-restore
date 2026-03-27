@@ -48,6 +48,7 @@ export default function FileUpload({ onStarted, onError }: Props) {
       <h2 className="text-lg font-medium text-gray-900">上传备份文件</h2>
       <p className="text-sm text-gray-500">
         支持格式：云厂商物理备份（<code>_qp.xb</code>、<code>.tar.gz</code>），
+        云厂商逻辑备份（<code>.tar.zst</code>），
         mongodump 导出（<code>.gz</code>、<code>.bson</code>、<code>.archive</code>）
       </p>
 
@@ -70,7 +71,7 @@ export default function FileUpload({ onStarted, onError }: Props) {
           type="file"
           className="hidden"
           onChange={handleSelect}
-          accept=".xb,.tar.gz,.tgz,.gz,.bson,.archive,.dump"
+          accept=".xb,.tar.gz,.tgz,.gz,.bson,.archive,.dump,.tar.zst,.zst"
         />
 
         {uploading ? (

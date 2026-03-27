@@ -1,7 +1,7 @@
 // Shared types for backup restore tool
 
 export type BackupType = "physical" | "logical";
-export type BackupFormat = "xbstream" | "tar.gz" | "mongodump-dir" | "mongodump-archive";
+export type BackupFormat = "xbstream" | "tar.gz" | "tar.zst" | "mongodump-dir" | "mongodump-archive";
 
 export interface BackupMeta {
   id: string;

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import path from "path";
 import type { BackupMeta } from "../types";
 import { generateId, getUploadPath, ensureDir, detectFormat } from "../lib/utils";
-import { detectTarGzBackupType } from "../lib/archive";
+import { detectTarGzBackupType, extractArchive } from "../lib/archive";
 import { taskManager } from "../services/task-manager";
 
 // In-memory backup store
@@ -53,6 +53,7 @@ app.post("/:backupId", async (c) => {
   await ensureDir(uploadDir);
 
   const filePath = path.join(uploadDir, file.name);
+  let extractedFilePath = filePath;
   taskManager.updateTask(taskId, {
     status: "running",
     progress: 5,
@@ -144,6 +145,44 @@ app.post("/:backupId", async (c) => {
     }
   }
 
+  if (format === "tar.zst") {
+    taskManager.updateTask(taskId, {
+      status: "running",
+      progress: 82,
+      currentStep: "Extracting tar.zst archive",
+    });
+    taskManager.appendLog(taskId, {
+      level: "info",
+      message: "Extracting tar.zst and merging BSON parts",
+    });
+
+    try {
+      const { extractedPath } = await extractArchive({
+        backupId,
+        filePath,
+        format: "tar.zst",
+        onProgress: (msg) => taskManager.appendLog(taskId, { level: "info", message: msg }),
+      });
+      extractedFilePath = extractedPath;
+      format = "mongodump-dir";
+      taskManager.appendLog(taskId, {
+        level: "info",
+        message: "tar.zst extracted, treating as mongodump-dir",
+      });
+    } catch (error: any) {
+      taskManager.appendLog(taskId, {
+        level: "error",
+        message: `Failed to extract tar.zst: ${error.message}`,
+      });
+      taskManager.updateTask(taskId, {
+        status: "failed",
+        currentStep: "Failed",
+        error: `Failed to extract tar.zst: ${error.message}`,
+      });
+      return c.json({ error: `Failed to extract tar.zst: ${error.message}` }, 400);
+    }
+  }
+
   taskManager.updateTask(taskId, {
     status: "running",
     progress: 95,
@@ -161,7 +200,7 @@ app.post("/:backupId", async (c) => {
     type,
     format: format as BackupMeta["format"],
     status: "ready",
-    extractedPath: filePath,
+    extractedPath: extractedFilePath,
     createdAt: Date.now(),
   };
 

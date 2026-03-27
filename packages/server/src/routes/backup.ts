@@ -72,22 +72,30 @@ app.get("/:id/tree", async (c) => {
           format: "tar.gz",
         });
         backup.extractedPath = extractedPath;
+
+        const logicalBackup = await isLogicalBackup(extractedPath);
+        if (logicalBackup) {
+          return c.json(
+            {
+              error: "Logical backup detected. Please start mongod first.",
+              type: "logical",
+              requiresMongod: true,
+            },
+            400
+          );
+        }
+
         tree = await parseLogicalBackup(backupId, extractedPath);
-      } else if (
-        backup.format === "mongodump-archive" ||
-        filePath.endsWith(".archive") ||
-        filePath.endsWith(".gz")
-      ) {
+      } else {
+        // mongodump-archive, mongodump-dir, and all other logical formats → require mongod
         return c.json(
           {
-            error: "Archive backup detected. Please start mongod first via POST /api/backups/:id/start-mongod",
+            error: "Logical backup detected. Please start mongod first.",
             type: "logical",
             requiresMongod: true,
           },
           400
         );
-      } else {
-        tree = await parseLogicalBackup(backupId, filePath);
       }
     }
 
@@ -306,16 +314,84 @@ async function runStartMongodTask(backupId: string, config: MongodConfig, taskId
     taskManager.updateTask(taskId, {
       status: "running",
       progress: 80,
-      currentStep: "Restoring archive into mongod",
+      currentStep: "Restoring backup into mongod",
     });
     taskManager.appendLog(taskId, {
       level: "info",
-      message: `Restoring archive ${backup.extractedPath} into temporary mongod on port ${port}`,
+      message: `Restoring ${backup.format} backup into temporary mongod on port ${port}`,
     });
 
-    tree = await parseArchiveBackup(backupId, backup.extractedPath!, port, (msg) =>
-      taskManager.appendLog(taskId, { level: "info", message: msg })
-    );
+    if (backup.format === "mongodump-dir") {
+      // For directory-based backups (including extracted tar.zst), use mongorestore --dir
+      const restoreArgs = [
+        "mongorestore",
+        `--host=127.0.0.1`,
+        `--port=${port}`,
+        `--dir=${backup.extractedPath}`,
+        "--drop",
+      ];
+
+      const onLog = (msg: string) => taskManager.appendLog(taskId, { level: "info", message: msg });
+      onLog(`Running: ${restoreArgs.join(" ")}`);
+
+      const restoreProc = Bun.spawn(restoreArgs, { stdout: "pipe", stderr: "pipe" });
+      const decoder = new TextDecoder();
+      const reader = restoreProc.stderr.getReader();
+      let stderrOutput = "";
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value, { stream: true });
+          stderrOutput += text;
+          const lines = text.split("\n").filter(Boolean);
+          for (const line of lines) {
+            onLog(`[mongorestore] ${line.trim()}`);
+          }
+        }
+      } catch {}
+      const restoreExit = await restoreProc.exited;
+      if (restoreExit !== 0) {
+        // Allow success with warnings
+        const successMatch = stderrOutput.match(/(\d+) document\(s\) restored successfully\. (\d+) document\(s\) failed/);
+        if (!(successMatch && parseInt(successMatch[1]) > 0 && successMatch[2] === "0")) {
+          throw new Error(`mongorestore failed: ${stderrOutput}`);
+        }
+      }
+      onLog("mongorestore completed successfully");
+
+      // Parse databases from mongod
+      const { MongoClient } = await import("mongodb");
+      const client = new MongoClient(`mongodb://127.0.0.1:${port}`);
+      await client.connect();
+      try {
+        const adminDb = client.db("admin");
+        const dbList = await adminDb.admin().listDatabases();
+        const allDbs = dbList.databases as Array<{ name: string; sizeOnDisk?: number }>;
+        const filteredDbs = allDbs.filter((d) => !["admin", "local", "config"].includes(d.name));
+
+        const databases: BackupTree["databases"] = [];
+        for (const dbInfo of filteredDbs) {
+          const db = client.db(dbInfo.name);
+          const colls = await db.listCollections().toArray();
+          const collections = colls.map((c) => ({ name: c.name, size: 0 }));
+          if (collections.length > 0) {
+            databases.push({ name: dbInfo.name, sizeOnDisk: dbInfo.sizeOnDisk, collections });
+          }
+          taskManager.appendLog(taskId, {
+            level: "info",
+            message: `Database "${dbInfo.name}": ${collections.length} collection(s)`,
+          });
+        }
+        tree = { backupId, type: "logical", databases };
+      } finally {
+        await client.close();
+      }
+    } else {
+      tree = await parseArchiveBackup(backupId, backup.extractedPath!, port, (msg) =>
+        taskManager.appendLog(taskId, { level: "info", message: msg })
+      );
+    }
   }
 
   backup.status = "ready";

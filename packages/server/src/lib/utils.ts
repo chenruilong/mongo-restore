@@ -35,6 +35,9 @@ export function getDataPath(backupId: string): string {
 }
 
 export function detectFormat(filename: string): { type: "physical" | "logical"; format: string } {
+  if (filename.endsWith(".tar.zst") || filename.endsWith(".tar.zst")) {
+    return { type: "logical", format: "tar.zst" };
+  }
   if (filename.endsWith(".archive.gz") || filename.endsWith(".archive")) {
     return { type: "logical", format: "mongodump-archive" };
   }
